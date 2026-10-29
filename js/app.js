@@ -26,18 +26,16 @@ const db = firebase.database();
 mapboxgl.accessToken = 'pk.eyJ1Ijoic29ubnyqb25lczIwMTQiLCJhIjoiY212NHExMmxjMTBmODJ3cHh5cmcxbmZyZSJ9.wq8EANp8vooYz3gE2o4Krg';
 
 let map;
-let activeMarkers = {}; // holds Mapbox Marker instances keyed by sessionId
-let activePolylines = {}; // holds active route lines if selected
+let activeMarkers = {}; 
 let fleetData = {};
 
 function initFleetCommandMap() {
     if (typeof mapboxgl === 'undefined' || $('map')._mapbox) return;
 
-    // Initialize Mapbox GL Vector Map centered near Houston/Humble
     map = new mapboxgl.Map({
         container: 'map',
         style: 'mapbox://styles/mapbox/streets-v12',
-        center: [-95.2831, 29.9731], // [lng, lat]
+        center: [-95.2831, 29.9731],
         zoom: 12
     });
 
@@ -58,15 +56,10 @@ function initFirebaseFleetListener() {
         renderFleetRosterAndMarkers();
     }, (error) => {
         console.error("Firebase fleet sync error:", error);
-        const statusEl = $('connection-status');
-        if (statusEl) {
-            statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> Disconnected';
-            statusEl.className = 'text-xs font-mono text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-500/20 flex items-center gap-1.5';
-        }
     });
 }
 
-// --- YOUR EXACT UNTOUCHED SOLO APP TRUCK SVG ASSET ---
+// --- TRUCK SVG MARKER ASSET ---
 function createTruckElement(accentColor) {
     const el = document.createElement('div');
     el.className = 'pro-vehicle-marker';
@@ -98,16 +91,17 @@ function createTruckElement(accentColor) {
     return el;
 }
 
-// --- RENDER LIVE ROSTER & MAPBOX MARKERS ---
+// --- RENDER ROSTER & MARKERS ---
 function renderFleetRosterAndMarkers() {
     const listContainer = $('driver-list');
     if (!listContainer) return;
     listContainer.innerHTML = '';
 
     const sessionIds = Object.keys(fleetData);
+    // Relaxed filter to catch sessions as long as lat/lng exist
     const activeSessions = sessionIds.filter(id => {
         const d = fleetData[id];
-        return d && !d.ended && isFinite(d.lat) && isFinite(d.lng);
+        return d && isFinite(Number(d.lat)) && isFinite(Number(d.lng));
     });
 
     const countEl = $('driver-count');
@@ -135,7 +129,13 @@ function renderFleetRosterAndMarkers() {
         const accentColors = ['#fbbf24', '#3b82f6', '#10b981', '#f43f5e', '#a855f7'];
         const color = accentColors[index % accentColors.length];
 
-        // 1. Build Sidebar Card
+        const lat = Number(driver.lat);
+        const lng = Number(driver.lng);
+        const driverName = driver.driverName || 'Active Driver';
+        const address = driver.custAddress || driver.destAddress || 'Custom Destination';
+        const speed = driver.speed || 0;
+
+        // 1. Sidebar Card
         const card = document.createElement('div');
         card.className = `bg-[#12141c] hover:bg-[#161923] border border-neutral-800 p-4 rounded-2xl cursor-pointer transition-all shadow-lg flex flex-col gap-2`;
         card.style.borderLeft = `4px solid ${color}`;
@@ -144,21 +144,21 @@ function renderFleetRosterAndMarkers() {
             <div class="flex items-center justify-between">
                 <span class="font-black text-white text-sm flex items-center gap-2">
                     <span class="w-2.5 h-2.5 rounded-full" style="background: ${color};"></span>
-                    ${driver.driverName || 'Active Driver'}
+                    ${driverName}
                 </span>
                 <span class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20">En Route</span>
             </div>
-            <p class="text-xs text-neutral-400 font-medium truncate">Dest: ${driver.destAddress || 'Custom Destination'}</p>
+            <p class="text-xs text-neutral-400 font-medium truncate">Dest: ${address}</p>
             <div class="flex items-center justify-between text-xs font-mono text-neutral-400 pt-1 border-t border-neutral-800/60">
-                <span>Speed: <strong style="color: ${color};">${driver.speed || 0} mph</strong></span>
+                <span>Speed: <strong style="color: ${color};">${speed} mph</strong></span>
                 <span>Live Telemetry</span>
             </div>
         `;
         listContainer.appendChild(card);
 
-        // 2. Update or Create Mapbox Marker
-        const lngLat = [driver.lng, driver.lat];
-        const popupHtml = `<b style="color:${color}; font-size:14px;">${driver.driverName || 'Driver'}</b><br><span style="color:#a3a3a3">Speed: ${driver.speed || 0} mph</span><br>Dest: <b>${driver.destAddress || 'N/A'}</b>`;
+        // 2. Map Marker
+        const lngLat = [lng, lat];
+        const popupHtml = `<b style="color:${color}; font-size:14px;">${driverName}</b><br><span style="color:#a3a3a3">Speed: ${speed} mph</span><br>Dest: <b>${address}</b>`;
 
         if (activeMarkers[sid]) {
             activeMarkers[sid].marker.setLngLat(lngLat);
@@ -177,14 +177,13 @@ function renderFleetRosterAndMarkers() {
     });
 }
 
-// --- SELECT DRIVER (ZOOM & FLY) ---
 window.selectDriver = function(sid) {
     const data = activeMarkers[sid] || fleetData[sid];
     if (!data) return;
     const driver = data.driver || data;
 
     map.flyTo({
-        center: [driver.lng, driver.lat],
+        center: [Number(driver.lng), Number(driver.lat)],
         zoom: 15,
         essential: true,
         duration: 1200
@@ -195,7 +194,6 @@ window.selectDriver = function(sid) {
     }
 };
 
-// --- RESET VIEW BACK TO OVERVIEW ---
 window.resetFleetView = function() {
     map.flyTo({
         center: [-95.2831, 29.9731],
@@ -203,10 +201,6 @@ window.resetFleetView = function() {
         essential: true,
         duration: 1000
     });
-};
-
-window.openAddDriverModal = function() {
-    alert("Add Driver onboarding modal ready to wire up.");
 };
 
 document.addEventListener('DOMContentLoaded', initFleetCommandMap);
